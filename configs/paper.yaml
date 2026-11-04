@@ -1,0 +1,30 @@
+# Paper-reported values; CLI scripts below consume matching flags, not this YAML.
+encoder:
+  model: Qwen3-8B
+  frozen_base: true
+  lora: {rank: 32, alpha: 64, dropout: 0.05, targets: [q_proj, k_proj, v_proj, o_proj]}
+  slots: 16
+  new_block_tokens: 1536
+  encoder_window: 4096
+  training: compression_pretraining_then_navigation_finetuning
+  pretraining_objective: history_compression
+navigator:
+  embedder: sentence-transformers/all-MiniLM-L6-v2
+  epochs: 3
+  lr_encoder: 5.0e-5
+  lr_navigator: 1.0e-3
+  validation_scenarios: 5
+executor:
+  model: Qwen3.8-27B
+  frozen: true
+  trainable_component: state_projector
+retrieval:
+  top_k: 3
+  skill_budget_tokens: 1200
+  fusion_alpha_alfworld: 0.75
+  fusion_alpha_other: select_on_training_split
+record:
+  goal_characters: 400
+  feedback_characters: 90
+  latest_actions: 6
+  latest_failures: 6

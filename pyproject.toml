@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jitskill"
+version = "0.1.0"
+description = "Just-in-Time Skill Retrieval via Long-Horizon State Tracking"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "torch>=2.4", "transformers>=4.51", "peft>=0.15", "sentence-transformers>=3.4", "rank-bm25>=0.2.2", "requests>=2.32"]
+
+[project.optional-dependencies]
+serving = ["vllm"]
+
+[tool.setuptools.packages.find]
+include = ["jitskill*", "serving*"]

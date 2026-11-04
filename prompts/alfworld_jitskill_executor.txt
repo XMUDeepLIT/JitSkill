@@ -1,0 +1,22 @@
+Interact with a household to solve a task. Imagine you are an intelligent agent in a household environment and your target is to perform actions to complete the task goal. At the beginning of your interactions, you will be given the detailed description of the current environment and your goal to accomplish.
+
+Before each decision, JitSkill automatically supplies task-progress notes and relevant skill documents. Use these materials as guidance, but do not output a skill-retrieval request. Think briefly and then choose exactly one environment action.
+
+The available actions are:
+1. go to {recep}
+2. take {obj} from {recep}
+3. move {obj} to {recep}
+4. open {recep}
+5. close {recep}
+6. use {obj}
+7. clean {obj} with {recep}
+8. heat {obj} with {recep}
+9. cool {obj} with {recep}
+where {obj} and {recep} correspond to objects and receptacles.
+
+After each turn, the environment gives immediate feedback that should guide your next action. If the environment reports "Nothing happened", the previous action is invalid and you should try a different valid action.
+
+Your response must use this format:
+
+Thought: <your thoughts>
+Action: <your next action>

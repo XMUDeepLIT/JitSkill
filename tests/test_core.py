@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from jitskill.navigator import NavController
 from pathlib import Path
 import torch
@@ -22,6 +22,88 @@ from serving.inject_proxy import InjectionService
 
 
 class CoreTests(unittest.TestCase):
+    def test_navigator_cli_requires_compression_checkpoint(self):
+        from contextlib import redirect_stderr
+
+        from jitskill.train_navigator import main
+        args = ['train_navigator', '--traj', 'train.jsonl', '--skills', 'skills.jsonl',
+                '--model', 'encoder', '--emb_model', 'embedder', '--out', 'nav']
+        error = io.StringIO()
+        with patch('sys.argv', args), redirect_stderr(error), self.assertRaises(SystemExit) as exit_status:
+            main()
+        self.assertEqual(exit_status.exception.code, 2)
+        self.assertIn('--init_encoder', error.getvalue())
+
+    def test_proxy_cli_requires_explicit_fusion_weight(self):
+        from contextlib import redirect_stderr
+
+        from serving.inject_proxy import build_argparser
+        args = ['--upstream', 'http://unused', '--upstream_model', 'executor',
+                '--tokenizer', 'executor', '--skills', 'skills.jsonl',
+                '--nav_base', 'encoder', '--nav_ckpt', 'nav.pt', '--enc_dir', 'enc']
+        error = io.StringIO()
+        with redirect_stderr(error), self.assertRaises(SystemExit) as exit_status:
+            build_argparser().parse_args(args)
+        self.assertEqual(exit_status.exception.code, 2)
+        self.assertIn('--alpha', error.getvalue())
+        self.assertEqual(build_argparser().parse_args(args + ['--alpha', '0.25']).alpha, 0.25)
+
+    def test_proxy_rejects_missing_episode_key_before_state_update(self):
+        service = object.__new__(InjectionService)
+        service.block_for = Mock()
+        for model in ('executor', 'k=3', 'lk=::k=3', 'lk=   ::k=3'):
+            with self.subTest(model=model):
+                code, response = service.complete({'model': model, 'messages': []})
+                self.assertEqual(code, 400)
+                self.assertIn('lk=', response['error']['message'])
+        service.block_for.assert_not_called()
+        with self.assertRaisesRegex(ValueError, 'lk='):
+            InjectionService.block_for(service, {'lk': ''}, [])
+
+    def test_tool_injection_requires_adapter_result_before_state_update(self):
+        service = object.__new__(InjectionService)
+        service.a = type('Args', (), {'injection_role': 'tool'})()
+        service.block_for = Mock()
+        code, response = service.complete({
+            'model': 'lk=episode::k=3',
+            'messages': [{'role': 'user', 'content': 'task'}],
+        })
+        self.assertEqual(code, 400)
+        self.assertIn('tool result', response['error']['message'])
+        service.block_for.assert_not_called()
+        with self.assertRaisesRegex(ValueError, 'existing tool result'):
+            service.rewrite([{'role': 'user', 'content': 'task'}], 'notes')
+        messages = [{'role': 'tool', 'tool_call_id': 'call-1', 'content': 'observed'}]
+        self.assertEqual(service.rewrite(messages, 'notes')[0]['content'], 'observed\n\nnotes')
+        self.assertEqual(messages[0]['content'], 'observed')
+
+    def test_proxy_control_fields_are_not_executor_model_id(self):
+        from serving.inject_proxy import parse_model
+        info = parse_model('lk=episode-2::k=3::bud=600')
+        self.assertEqual(info, {'lk': 'episode-2', 'k': 3, 'bud': 600})
+        service = object.__new__(InjectionService)
+        service.a = type('Args', (), {
+            'injection_role': 'user', 'upstream_model': 'real-executor',
+            'exec_latent': 0, 'no_think': 0, 'timeout': 1,
+        })()
+        service._tl = threading.local()
+        service.block_for = Mock(return_value=('notes', []))
+        service.upstream = 'http://unused/v1/chat/completions'
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"choices": []}'
+        with patch('urllib.request.urlopen', return_value=response) as upstream:
+            code, _ = service.complete({'model': 'lk=episode-2::k=3', 'messages': [
+                {'role': 'user', 'content': 'task'}]})
+        self.assertEqual(code, 200)
+        forwarded = json.loads(upstream.call_args.args[0].data)
+        self.assertEqual(forwarded['model'], 'real-executor')
+        self.assertEqual(service.block_for.call_args.args[0]['lk'], 'episode-2')
+        from jitskill.explicit_record import episode_fp
+        history = [{'role': 'user', 'content': 'same task instruction'}]
+        self.assertNotEqual(episode_fp(history, 'episode-1'), episode_fp(history, 'episode-2'))
+
     def test_record_bounds_failure_and_evidence(self):
         r = ExplicitRecord('g' * 500)
         for i in range(10):

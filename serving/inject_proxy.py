@@ -67,6 +67,8 @@ class InjectionService:
     # ------------------------------------------------------------------ skill acquisition
     def block_for(self, info, msgs):
         """Text injected at decision point t, plus the selected skill ids."""
+        if not isinstance(info.get("lk"), str) or not info["lk"].strip():
+            raise ValueError("model must include a nonempty lk=<unique-episode-id>")
         fp = episode_fp(msgs, info["lk"])
         goal = task_instruction(msgs)                       # u
         say, obs = last_turns(msgs)
@@ -124,8 +126,15 @@ class InjectionService:
     def complete(self, body):
         if body.get("stream"):
             return 400, {"error": {"message": "streaming is not supported"}}
-        info = parse_model(body.get("model", ""))
+        try:
+            info = parse_model(body.get("model", ""))
+        except (TypeError, ValueError):
+            return 400, {"error": {"message": "invalid proxy model control fields"}}
+        if not info["lk"].strip():
+            return 400, {"error": {"message": "model must include a nonempty lk=<unique-episode-id>"}}
         msgs = body.get("messages") or []
+        if self.a.injection_role == "tool" and not any(m.get("role") == "tool" for m in msgs):
+            return 400, {"error": {"message": "SkillsBench adapter must provide an injectable tool result"}}
         if any(MEM_HEADER in text_content(m) for m in msgs):
             return 400, {"error": {"message": "requests must contain raw pre-injection history"}}
         self._tl.latent = None
@@ -181,7 +190,7 @@ def build_argparser():
     ap.add_argument("--nav_ckpt", required=True, help="<prefix>_nav.pt from train_navigator")
     ap.add_argument("--enc_dir", required=True, help="<prefix>_enc/ from train_navigator")
     ap.add_argument("--nav_device", default="cuda:0")
-    ap.add_argument("--alpha", type=float, default=1.0,
+    ap.add_argument("--alpha", type=float, required=True,
                     help="weight of the learned view vs the frozen step-text view")
     ap.add_argument("--lex", choices=("step", "bt"), default="step",
                     help="text of the lexical (BM25) half: current step, or the B_t summary")

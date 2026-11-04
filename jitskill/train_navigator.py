@@ -78,8 +78,8 @@ def main():
     ap.add_argument("--head", choices=["pointer", "cross"], default="cross")
     ap.add_argument("--no_anchor_feat", action="store_true",
                     help="cross head: drop the cos(e(B_t), e(k)) feature")
-    ap.add_argument("--init_encoder", default="",
-                    help="optional train_compression checkpoint used to initialize the encoder")
+    ap.add_argument("--init_encoder", required=True,
+                    help="train_compression checkpoint used to initialize the encoder")
     a = ap.parse_args()
 
     from sentence_transformers import SentenceTransformer
@@ -111,8 +111,7 @@ def main():
         off += len(e["marks"])
 
     enc = LatentEncoder(a.model, a.device)
-    if a.init_encoder:
-        enc.load_trainable_checkpoint(a.init_encoder)
+    enc.load_trainable_checkpoint(a.init_encoder)
     nav = Navigator(enc.d_z, card_emb.shape[1], card_emb.shape[1]).to(a.device)
     head = None
     if a.head == "cross":

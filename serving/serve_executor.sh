@@ -10,7 +10,7 @@ ENGINE_PORT=${ENGINE_PORT:-8000}
 PROXY_PORT=${PROXY_PORT:-8100}
 SERVE_HOST=${SERVE_HOST:-127.0.0.1}
 MODEL_NAME=${MODEL_NAME:-executor}
-ALPHA=${ALPHA:-0.75}
+: "${ALPHA:?set the fusion weight selected on the benchmark training split (ALFWorld: 0.75)}"
 INJECTION_ROLE=${INJECTION_ROLE:-user}
 NAV_DEVICE=${NAV_DEVICE:-cuda:0}
 python -m vllm.entrypoints.openai.api_server \

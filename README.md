@@ -13,7 +13,7 @@ Large Language Model (LLM)-based agents can reuse procedural knowledge through e
 
 <p align="center"><img src="assets/intro_retrieval.png" width="100%" alt="Paper introduction figure: pre-execution and just-in-time skill retrieval"></p>
 
-*Introduction figure from the paper. Pre-execution retrieval can miss needs revealed during execution, whereas just-in-time retrieval acquires skills on demand as needs become observable.*
+*Introduction illustration exported from page 1 of `resources/intro.pdf` in the paper's Overleaf project. Pre-execution retrieval can miss needs revealed during execution, whereas just-in-time retrieval acquires skills on demand as needs become observable.*
 
 JitSkill couples this execution-time retrieval paradigm with task-state tracking. A candidate skill should be judged not only by the current observation, but also by prior execution: what has been completed, which results can be reused, which attempts have failed, and which requirements remain unresolved. This avoids **execution drift**, in which locally plausible skill decisions repeat completed work or conflict with accumulated task progress.
 
@@ -55,12 +55,15 @@ export EMBEDDER=/path/to/all-MiniLM-L6-v2
 export TRAIN_TRAJECTORIES=/path/to/train.jsonl
 export SKILLS=/path/to/skills.jsonl
 export WORK_DIR=work
+export ALPHA="${ALPHA:?set the fusion weight selected for the teacher benchmark}"
 bash scripts/train_compression.sh
 export COMPRESSOR_CKPT=work/compression.pt
 bash scripts/train_navigator.sh
 ```
 
-Next, collect raw, pre-injection executor requests on the official training split using the benchmark harness. Build row-aligned explicit/skill prompts and latent states:
+**External prerequisite for projection training:** run the executor on the official training split with a benchmark harness that records raw, pre-injection calls. The harness and its logging adapter are not included in this repository. Supply `work/teacher/tasks/<task_id>/logs/lm_calls.jsonl` with `input.messages` and `output.choices[0].message.content`, and `work/teacher/successes.json` listing successful task IDs. `work/teacher` is an external input directory, not an output of the training scripts. The supplied corpus builder reads AppWorld-shaped user-turn logs; other benchmarks require an external adapter matching the [data contracts](docs/data_formats.md).
+
+Build row-aligned explicit/skill prompts and latent states using the same fusion weight as serving:
 
 ```bash
 python -m jitskill.executor.build_sft_corpus \
@@ -68,7 +71,8 @@ python -m jitskill.executor.build_sft_corpus \
   --out work/actions.jsonl --latent_out work/states.npy \
   --tokenizer /path/to/frozen-executor --skills /path/to/skills.jsonl \
   --emb_model /path/to/all-MiniLM-L6-v2 --nav_base /path/to/encoder \
-  --nav_ckpt work/nav_nav.pt --enc_dir work/nav_enc --nav_device cuda:0
+  --nav_ckpt work/nav_nav.pt --enc_dir work/nav_enc --nav_device cuda:0 \
+  --alpha "$ALPHA"
 
 export EXECUTOR_DIR=/path/to/frozen-executor
 export SFT_ROWS=work/actions.jsonl
@@ -76,7 +80,7 @@ export LATENT_ROWS=work/states.npy
 bash scripts/train_projection.sh
 ```
 
-Scenario-disjoint validation is used for checkpoint selection. Projector optimizer defaults are implementation choices because the paper does not specify its learning rate or gradient accumulation; see [alignment details](docs/paper_alignment.md).
+Compression training saves the final encoder checkpoint without validation-based selection. Both the shell script and the Python navigator CLI require this checkpoint (`COMPRESSOR_CKPT` / `--init_encoder`). Navigator and projector training use scenario-disjoint validation for checkpoint selection: navigator recall@1 and projector next-action loss, respectively. Projector optimizer defaults are listed in [alignment details](docs/paper_alignment.md).
 
 ## Serving
 
@@ -88,17 +92,24 @@ export ENC_DIR=work/nav_enc
 export PROJECTOR=work/projector.pt
 export SKILLS=/path/to/skills.jsonl
 export JITSKILL_EMB_MODEL=/path/to/all-MiniLM-L6-v2
+# ALFWorld example; replace with the training-selected weight for your benchmark.
+export ALPHA=0.75
+export INJECTION_ROLE=user
 bash serving/serve_executor.sh
 ```
 
-Point the benchmark harness to `http://127.0.0.1:8100/v1`, with model `lk=<unique-episode-id>::k=3`. Each episode must have a unique key; repeated requests with the same history do not advance its latent state again. Requests must include raw history before JitSkill injection. Streaming requests are not supported.
+Point the benchmark harness to `http://127.0.0.1:8100/v1`, with model `lk=<unique-episode-id>::k=3`. This string contains proxy session controls: `lk` identifies the episode, `k` sets the skill count, and optional `bud` sets the token budget (default 1,200). It is not the executor's model ID. The proxy forwards requests with `MODEL_NAME` (default `executor`), the model name served by vLLM.
 
-Use `INJECTION_ROLE=user` for ALFWorld/AppWorld, `tool` for SkillsBench, and `system` for tau2-Bench. The ALFWorld fusion weight is 0.75; other benchmark weights must be selected only on their training split. SkillsBench libraries can provide a compact `inject` pointer containing the skill name, purpose, and mounted `SKILL.md` path.
+Use a new `lk` for every episode, including reruns of the same task. The proxy rejects missing or blank keys with HTTP 400. Repeated requests with the same history do not advance latent state again. Requests must include raw history before JitSkill injection. Streaming requests are not supported.
+
+Use `INJECTION_ROLE=user` for ALFWorld/AppWorld, `tool` for SkillsBench, and `system` for tau2-Bench. With `tool`, the SkillsBench adapter must provide an existing, injectable `tool` result in every request, including the initial decision; setting the environment variable alone does not supply this message. Requests without a tool result receive HTTP 400. SkillsBench libraries can provide a compact `inject` pointer containing the skill name, purpose, and mounted `SKILL.md` path.
+
+`ALPHA` is required by the launch script and `--alpha` by the proxy CLI. There is no default fusion weight. ALFWorld uses 0.75; for SkillsBench or tau2-Bench, explicitly supply the weight selected on the designated training data, not on evaluation tasks.
 
 For the automatic proxy, use [`prompts/alfworld_jitskill_executor.txt`](prompts/alfworld_jitskill_executor.txt) rather than the archived shared ALFWorld template: retrieval occurs before every action decision, so the executor should emit an environment action instead of a `SkillRequest`.
 
 ## Release scope
 
-This release implements the paper's core progress tracking, navigation, projector training, and executor interface. Benchmark-specific harness adapters and full end-to-end benchmark reproduction remain to be validated. Unit tests use synthetic evidence and a small frozen decoder; their success does not establish the paper's benchmark scores.
+Included: progress tracking, compression and navigation training, projector training, executor proxy, prompt templates, and component tests. Not included: benchmark harnesses or their adapters, pretrained checkpoints, raw trajectories, or result logs.
 
-The illustration and research description above come from the paper's Introduction, Method, and Method Details. The archived appendix prompt and the proxy-compatible runtime prompt are in `prompts/`. The source-to-equation mapping and known paper ambiguities are recorded in `docs/paper_alignment.md`.
+The Introduction illustration is a page-1 export of the Overleaf project's `resources/intro.pdf`; the current LaTeX Introduction instead references `resources/skilljit_intro1.png`. The README export and the LaTeX image are distinct assets. The README also displays the pipeline illustration. Figure sources and implementation settings are tracked in [docs/paper_alignment.md](docs/paper_alignment.md). The archived appendix prompt and the proxy-compatible runtime prompt are in `prompts/`.

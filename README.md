@@ -11,9 +11,9 @@ Large Language Model (LLM)-based agents can reuse procedural knowledge through e
 
 ## Just-in-Time Skill Retrieval
 
-<p align="center"><img src="assets/intro_retrieval.png" width="100%" alt="Paper introduction figure: fixed retrieval, local just-in-time retrieval, and JitSkill task-state tracking"></p>
+<p align="center"><img src="assets/intro_retrieval.png" width="100%" alt="Paper introduction figure: traditional and just-in-time skill retrieval"></p>
 
-*Introduction figure from the paper. Fixed pre-execution retrieval can miss evolving needs. Local-context just-in-time retrieval can still lead to execution drift. JitSkill tracks task state to guide both skill retrieval and use.*
+*Introduction figure from the paper. Traditional pre-execution retrieval can miss skill needs revealed as execution unfolds, whereas just-in-time retrieval acquires skills on demand.*
 
 JitSkill couples this execution-time retrieval paradigm with task-state tracking. A candidate skill should be judged not only by the current observation, but also by prior execution: what has been completed, which results can be reused, which attempts have failed, and which requirements remain unresolved. This avoids **execution drift**, in which locally plausible skill decisions repeat completed work or conflict with accumulated task progress.
 
